@@ -1,0 +1,30 @@
+name: Scheduled News Refresh (free — GitHub Actions cron)
+
+# Render's free web service sleeps after 15 minutes of inactivity, so the in-process
+# APScheduler job (app/ingestion/scheduler.py) can't be trusted to fire on schedule --
+# a sleeping process runs no code at all. GitHub Actions' scheduled workflows are free
+# (2,000 min/month on a private repo, unlimited on a public one) and this job barely uses
+# any of that budget, so it's used as the reliable external trigger instead. Calling the
+# endpoint also has the side effect of waking a sleeping backend back up.
+
+on:
+  schedule:
+    - cron: "0 * * * *" # hourly; matches the default NEWS_REFRESH_INTERVAL_MINUTES=60
+  workflow_dispatch: {} # lets you trigger a refresh manually from the Actions tab
+
+jobs:
+  trigger-refresh:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Call the refresh endpoint
+        env:
+          BACKEND_URL: ${{ secrets.BACKEND_URL }} # e.g. https://sentellent-backend.onrender.com
+          INTERNAL_REFRESH_TOKEN: ${{ secrets.INTERNAL_REFRESH_TOKEN }}
+        run: |
+          if [ -z "$BACKEND_URL" ] || [ -z "$INTERNAL_REFRESH_TOKEN" ]; then
+            echo "BACKEND_URL or INTERNAL_REFRESH_TOKEN repo secret not set yet — skipping. Set both once your Render backend is deployed."
+            exit 0
+          fi
+          curl -sf -X POST "$BACKEND_URL/api/internal/refresh-news" \
+            -H "X-Internal-Token: $INTERNAL_REFRESH_TOKEN" \
+            --max-time 20

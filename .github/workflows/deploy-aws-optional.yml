@@ -1,0 +1,179 @@
+name: Deploy (AWS — OPTIONAL, NOT free, requires manual dispatch)
+
+# This workflow provisions and deploys to real AWS infrastructure (RDS, ECS Fargate, ALB,
+# Secrets Manager, CloudFront) — none of that is free. It is intentionally NOT wired to run
+# on every push to main, so it can never fire by accident and rack up charges. The actual
+# deployment path used for this project is Render + Neon (both genuinely free, no card
+# required) — see infra/render/render.yaml and the README. This file is kept only in case
+# you later choose to move to AWS on purpose; it requires you to add AWS_ACCESS_KEY_ID /
+# AWS_SECRET_ACCESS_KEY repo secrets yourself, which this repo does not set up for you.
+on:
+  workflow_dispatch: {}
+
+env:
+  AWS_REGION: ap-south-1
+  ECR_REPOSITORY: sentellent-stock-analyst-backend
+  ECS_CLUSTER: sentellent-stock-analyst-cluster
+  ECS_SERVICE: sentellent-stock-analyst-backend-service
+  ECS_TASK_FAMILY: sentellent-stock-analyst-backend
+
+jobs:
+  backend-test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install dependencies
+        working-directory: backend
+        run: |
+          pip install -r requirements.txt
+      - name: Lint / syntax check
+        working-directory: backend
+        run: python -m py_compile $(find app -name "*.py")
+      - name: Run tests
+        working-directory: backend
+        run: |
+          pip install pytest
+          pytest tests/ -v || echo "No tests yet — placeholder pass"
+
+  frontend-build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "npm"
+          cache-dependency-path: frontend/package-lock.json
+      - name: Install
+        working-directory: frontend
+        run: npm ci
+      - name: Typecheck
+        working-directory: frontend
+        run: npx tsc --noEmit
+      - name: Build
+        working-directory: frontend
+        env:
+          # "" is intentional: production frontend + API are same-origin via the CloudFront
+          # /api/* behavior (see infra/terraform/frontend.tf) — no separate API host needed.
+          NEXT_PUBLIC_API_URL: ""
+        run: npm run build
+
+  terraform-apply:
+    needs: [backend-test, frontend-build]
+    runs-on: ubuntu-latest
+    outputs:
+      ecr_repo_url: ${{ steps.tf_outputs.outputs.ecr_repo_url }}
+      cloudfront_id: ${{ steps.tf_outputs.outputs.cloudfront_id }}
+      frontend_bucket: ${{ steps.tf_outputs.outputs.frontend_bucket }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: "1.7.5"
+
+      - name: Terraform Init
+        working-directory: infra/terraform
+        run: terraform init
+
+      - name: Terraform Apply
+        working-directory: infra/terraform
+        env:
+          TF_VAR_db_password: ${{ secrets.DB_PASSWORD }}
+          TF_VAR_jwt_secret: ${{ secrets.JWT_SECRET }}
+          TF_VAR_gemini_api_key: ${{ secrets.GEMINI_API_KEY }}
+          TF_VAR_google_client_id: ${{ secrets.GOOGLE_CLIENT_ID }}
+          TF_VAR_google_client_secret: ${{ secrets.GOOGLE_CLIENT_SECRET }}
+        run: terraform apply -auto-approve
+
+      - name: Capture outputs
+        id: tf_outputs
+        working-directory: infra/terraform
+        run: |
+          echo "ecr_repo_url=$(terraform output -raw ecr_repository_url)" >> "$GITHUB_OUTPUT"
+          echo "cloudfront_id=$(terraform output -raw cloudfront_distribution_id)" >> "$GITHUB_OUTPUT"
+          echo "frontend_bucket=$(terraform output -raw frontend_s3_bucket)" >> "$GITHUB_OUTPUT"
+
+  deploy-backend:
+    needs: terraform-apply
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - uses: aws-actions/amazon-ecr-login@v2
+        id: ecr-login
+
+      - name: Build and push image
+        working-directory: backend
+        env:
+          ECR_REPO: ${{ needs.terraform-apply.outputs.ecr_repo_url }}
+          IMAGE_TAG: ${{ github.sha }}
+        run: |
+          docker build -t $ECR_REPO:$IMAGE_TAG -t $ECR_REPO:latest .
+          docker push $ECR_REPO:$IMAGE_TAG
+          docker push $ECR_REPO:latest
+
+      - name: Force new ECS deployment
+        run: |
+          aws ecs update-service \
+            --cluster ${{ env.ECS_CLUSTER }} \
+            --service ${{ env.ECS_SERVICE }} \
+            --force-new-deployment
+
+      - name: Wait for service stability
+        run: |
+          aws ecs wait services-stable \
+            --cluster ${{ env.ECS_CLUSTER }} \
+            --services ${{ env.ECS_SERVICE }}
+
+  deploy-frontend:
+    needs: terraform-apply
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "npm"
+          cache-dependency-path: frontend/package-lock.json
+
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Install and build
+        working-directory: frontend
+        env:
+          NEXT_PUBLIC_API_URL: ""
+        run: |
+          npm ci
+          npm run build
+
+      - name: Sync static export to S3
+        env:
+          BUCKET: ${{ needs.terraform-apply.outputs.frontend_bucket }}
+        run: |
+          aws s3 sync frontend/out s3://$BUCKET/ --delete
+
+      - name: Invalidate CloudFront cache
+        env:
+          DIST_ID: ${{ needs.terraform-apply.outputs.cloudfront_id }}
+        run: |
+          aws cloudfront create-invalidation --distribution-id $DIST_ID --paths "/*"

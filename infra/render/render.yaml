@@ -1,0 +1,87 @@
+# Render Blueprint — a genuinely free deployment path: no AWS, no credit card required
+# anywhere in this stack.
+#
+# How to use:
+#   1. Push this repo to GitHub.
+#   2. In the Render dashboard: New -> Blueprint -> pick this repo -> it finds this file
+#      automatically (render.yaml at the repo root is the default path; this project keeps
+#      it under infra/render/ instead, so point Render at infra/render/render.yaml when asked).
+#   3. Render provisions both services below on its free plan. Every push to `main`
+#      auto-redeploys both -- that alone satisfies the challenge's "push to main -> deploy
+#      automatically" requirement, no separate pipeline needed.
+#   4. Fill in the `sync: false` values in the Render dashboard (Render never stores secret
+#      values in this file or in git).
+#
+# Why no database service is defined here:
+#   Render's free Postgres expires 30 days after creation. This project needs pgvector and
+#   a DB that doesn't quietly disappear mid-project, so it uses Neon (neon.com) instead --
+#   Neon's free tier never expires, needs no credit card, and supports pgvector natively.
+#   Create a free Neon project, run `CREATE EXTENSION IF NOT EXISTS vector;` once against it
+#   (the Alembic migration also does this, so it's a no-op if already done), and paste the
+#   connection string into DATABASE_URL below.
+#
+# IMPORTANT — the chicken-and-egg URL problem:
+#   OAUTH_REDIRECT_URI / FRONTEND_URL / NEXT_PUBLIC_API_URL below assume the exact service
+#   names below are available and Render assigns them as *.onrender.com. If Render assigns
+#   different subdomains (e.g. a random suffix because the name was taken), update these
+#   three values in the Render dashboard to match your actual URLs and manually redeploy
+#   both services once. Same idea as updating a CloudFront domain after a first `terraform
+#   apply` -- the URL genuinely isn't known until after the first deploy.
+
+services:
+  - type: web
+    name: sentellent-backend
+    runtime: docker
+    dockerfilePath: ./backend/Dockerfile
+    dockerContext: ./backend
+    plan: free
+    healthCheckPath: /health
+    autoDeploy: true
+    envVars:
+      - key: ENV
+        value: production
+      - key: DEBUG
+        value: "false"
+      - key: DATABASE_URL
+        sync: false # paste your Neon connection string here (see note above)
+      - key: JWT_SECRET
+        generateValue: true # Render generates + stores a random secret, never in git
+      - key: GOOGLE_CLIENT_ID
+        sync: false
+      - key: GOOGLE_CLIENT_SECRET
+        sync: false
+      - key: OAUTH_REDIRECT_URI
+        value: https://sentellent-backend.onrender.com/api/auth/google/callback
+      - key: FRONTEND_URL
+        value: https://sentellent-frontend.onrender.com
+      - key: GEMINI_API_KEY
+        sync: false
+      - key: EMBEDDING_MODEL
+        value: text-embedding-004
+      - key: EMBEDDING_DIM
+        value: "768"
+      - key: CHAT_MODEL
+        value: gemini-2.5-flash
+      - key: NEWS_REFRESH_INTERVAL_MINUTES
+        value: "60"
+      - key: CHUNK_SIZE
+        value: "800"
+      - key: CHUNK_OVERLAP
+        value: "120"
+      - key: INTERNAL_REFRESH_TOKEN
+        generateValue: true # copy this value into the INTERNAL_REFRESH_TOKEN GitHub secret too
+
+  - type: static
+    name: sentellent-frontend
+    runtime: static
+    buildCommand: cd frontend && npm ci && npm run build
+    staticPublishPath: ./frontend/out
+    autoDeploy: true
+    envVars:
+      - key: NEXT_PUBLIC_API_URL
+        value: https://sentellent-backend.onrender.com
+    routes:
+      # SPA-style fallback so client-side routes (e.g. /auth/callback) don't 404 on refresh
+      - type: rewrite
+        source: /*
+        destination: /index.html
