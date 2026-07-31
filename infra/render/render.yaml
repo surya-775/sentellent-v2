@@ -71,7 +71,7 @@ services:
       - key: INTERNAL_REFRESH_TOKEN
         generateValue: true # copy this value into the INTERNAL_REFRESH_TOKEN GitHub secret too
 
-  - type: static
+  - type: web
     name: sentellent-frontend
     runtime: static
     buildCommand: cd frontend && npm ci && npm run build
