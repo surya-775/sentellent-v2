@@ -25,6 +25,12 @@ async function request(path: string, options: RequestInit = {}) {
   if (token) headers["Authorization"] = `Bearer ${token}`;
 
   const res = await fetch(`${API_URL}${path}`, { ...options, headers });
+  if (res.status === 401) {
+    // Token is invalid, expired, or belongs to a user that no longer exists.
+    // Clear it so "/" stops treating its mere presence as "logged in" and
+    // bouncing straight back to a dashboard call that will 401 again.
+    clearToken();
+  }
   if (!res.ok) {
     const text = await res.text();
     throw new Error(`API error ${res.status}: ${text}`);

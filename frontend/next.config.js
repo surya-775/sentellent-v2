@@ -7,6 +7,7 @@ const nextConfig = {
   // HTML — that was a real mismatch: CI was syncing .next/static + public to S3,
   // which never contained the actual page HTML.)
   output: "export",
+  trailingSlash: true,
   images: { unoptimized: true }, // next/image requires a server; not available in static export
 };
 
