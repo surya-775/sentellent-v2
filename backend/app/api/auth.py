@@ -45,8 +45,13 @@ async def google_callback(request: Request, db: Session = Depends(get_db)):
         db.refresh(user)
 
     jwt_token = create_access_token(user.id, user.email)
-    # Redirect back to frontend with token — frontend stores it and calls the API with Authorization: Bearer
-    return RedirectResponse(url=f"{settings.FRONTEND_URL}/auth/callback?token={jwt_token}")
+
+    print("Generated JWT:", jwt_token)
+    print("JWT_SECRET:", settings.JWT_SECRET[:10] + "...")
+
+    return RedirectResponse(
+    url=f"{settings.FRONTEND_URL}/auth/callback?token={jwt_token}"
+    )
 
 
 @router.get("/me")
