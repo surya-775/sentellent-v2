@@ -10,10 +10,20 @@ function AuthCallbackInner() {
 
   useEffect(() => {
     const token = params.get("token");
+
+    console.log("Callback token:", token);
+
     if (token) {
       setToken(token);
+
+      console.log(
+        "Stored token after setToken:",
+        localStorage.getItem("token")
+      );
+
       router.push("/dashboard");
     } else {
+      console.log("No token found");
       router.push("/");
     }
   }, [params, router]);
