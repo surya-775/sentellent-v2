@@ -57,9 +57,9 @@ resource "aws_ecs_task_definition" "backend" {
 
   container_definitions = jsonencode([
     {
-      name         = "backend"
-      image        = "${aws_ecr_repository.backend.repository_url}:${var.backend_image_tag}"
-      essential    = true
+      name      = "backend"
+      image     = "${aws_ecr_repository.backend.repository_url}:${var.backend_image_tag}"
+      essential = true
       portMappings = [{
         containerPort = 8000
         protocol      = "tcp"
@@ -81,7 +81,7 @@ resource "aws_ecs_task_definition" "backend" {
       ]
       logConfiguration = {
         logDriver = "awslogs"
-        options   = {
+        options = {
           "awslogs-group"         = aws_cloudwatch_log_group.backend.name
           "awslogs-region"        = var.aws_region
           "awslogs-stream-prefix" = "backend"
