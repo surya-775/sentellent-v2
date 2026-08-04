@@ -23,13 +23,13 @@ resource "aws_db_instance" "main" {
   db_subnet_group_name   = aws_db_subnet_group.main.name
   vpc_security_group_ids = [aws_security_group.rds.id]
 
-  backup_retention_period = 7
-  skip_final_snapshot     = false
+  backup_retention_period   = 7
+  skip_final_snapshot       = false
   final_snapshot_identifier = "${var.project_name}-db-final-snapshot"
-  deletion_protection     = false # set true once this is a real production system
+  deletion_protection       = false # set true once this is a real production system
 
   publicly_accessible = false
-  multi_az             = false # bump to true for prod HA if budget allows
+  multi_az            = false # bump to true for prod HA if budget allows
 
   tags = { Name = "${var.project_name}-db" }
 }
