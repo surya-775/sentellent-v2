@@ -13,25 +13,25 @@ resource "aws_s3_bucket_public_access_block" "frontend" {
 
   block_public_acls       = true
   block_public_policy     = true
-  ignore_public_acls       = true
+  ignore_public_acls      = true
   restrict_public_buckets = true
 }
 
 resource "aws_cloudfront_origin_access_control" "frontend" {
   name                              = "${var.project_name}-frontend-oac"
   origin_access_control_origin_type = "s3"
-  signing_behavior                   = "always"
-  signing_protocol                   = "sigv4"
+  signing_behavior                  = "always"
+  signing_protocol                  = "sigv4"
 }
 
 resource "aws_cloudfront_distribution" "frontend" {
   enabled             = true
   default_root_object = "index.html"
-  price_class          = "PriceClass_100" # cheapest tier; covers India + most of Asia/NA/EU edge locations
+  price_class         = "PriceClass_100" # cheapest tier; covers India + most of Asia/NA/EU edge locations
 
   origin {
     domain_name              = aws_s3_bucket.frontend.bucket_regional_domain_name
-    origin_id                 = "frontend-s3"
+    origin_id                = "frontend-s3"
     origin_access_control_id = aws_cloudfront_origin_access_control.frontend.id
   }
 
@@ -57,9 +57,9 @@ resource "aws_cloudfront_distribution" "frontend" {
 
   default_cache_behavior {
     allowed_methods        = ["GET", "HEAD"]
-    cached_methods           = ["GET", "HEAD"]
-    target_origin_id         = "frontend-s3"
-    viewer_protocol_policy   = "redirect-to-https"
+    cached_methods         = ["GET", "HEAD"]
+    target_origin_id       = "frontend-s3"
+    viewer_protocol_policy = "redirect-to-https"
 
     forwarded_values {
       query_string = false
@@ -68,14 +68,14 @@ resource "aws_cloudfront_distribution" "frontend" {
   }
 
   ordered_cache_behavior {
-    path_pattern             = "/api/*"
-    target_origin_id         = "backend-alb"
-    viewer_protocol_policy   = "https-only"
-    allowed_methods          = ["GET", "HEAD", "OPTIONS", "PUT", "POST", "PATCH", "DELETE"]
-    cached_methods           = ["GET", "HEAD"]
-    min_ttl                  = 0
-    default_ttl              = 0
-    max_ttl                  = 0 # API responses are dynamic/per-user — never cache at the edge
+    path_pattern           = "/api/*"
+    target_origin_id       = "backend-alb"
+    viewer_protocol_policy = "https-only"
+    allowed_methods        = ["GET", "HEAD", "OPTIONS", "PUT", "POST", "PATCH", "DELETE"]
+    cached_methods         = ["GET", "HEAD"]
+    min_ttl                = 0
+    default_ttl            = 0
+    max_ttl                = 0 # API responses are dynamic/per-user — never cache at the edge
 
     forwarded_values {
       query_string = true
@@ -85,14 +85,14 @@ resource "aws_cloudfront_distribution" "frontend" {
   }
 
   ordered_cache_behavior {
-    path_pattern             = "/health"
-    target_origin_id         = "backend-alb"
-    viewer_protocol_policy   = "https-only"
-    allowed_methods          = ["GET", "HEAD"]
-    cached_methods           = ["GET", "HEAD"]
-    min_ttl                  = 0
-    default_ttl              = 0
-    max_ttl                  = 0
+    path_pattern           = "/health"
+    target_origin_id       = "backend-alb"
+    viewer_protocol_policy = "https-only"
+    allowed_methods        = ["GET", "HEAD"]
+    cached_methods         = ["GET", "HEAD"]
+    min_ttl                = 0
+    default_ttl            = 0
+    max_ttl                = 0
 
     forwarded_values {
       query_string = false
@@ -102,7 +102,7 @@ resource "aws_cloudfront_distribution" "frontend" {
 
   custom_error_response {
     error_code         = 404
-    response_code       = 200
+    response_code      = 200
     response_page_path = "/index.html" # SPA-style fallback for client routing
   }
 
@@ -122,7 +122,7 @@ resource "aws_cloudfront_distribution" "frontend" {
 resource "aws_s3_bucket_policy" "frontend" {
   bucket = aws_s3_bucket.frontend.id
   policy = jsonencode({
-    Version = "2012-10-17"
+    Version   = "2012-10-17"
     Statement = [{
       Sid       = "AllowCloudFrontServicePrincipal"
       Effect    = "Allow"
