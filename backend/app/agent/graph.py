@@ -31,14 +31,19 @@ class AgentState(TypedDict):
     stock_symbols: List[str]
     retrieved: List[RetrievedChunk]
     persona: Optional[InvestorPersona]
+    persona_updated: bool
     answer: str
     citations: List[dict]
 
 
 def node_update_memory(state: AgentState) -> AgentState:
     """From Chat: extract and persist any investor-persona facts in this turn's message."""
-    update_persona_from_message(state["db"], state["user_id"], state["message"])
-    state["persona"] = get_or_create_persona(state["db"], state["user_id"])
+    updated_persona = update_persona_from_message(state["db"], state["user_id"], state["message"])
+    state["persona"] = updated_persona or get_or_create_persona(state["db"], state["user_id"])
+    # Distinguishes "this message actually contained new persona info" from
+    # "no facts here" — used downstream so a pure persona statement (no stock
+    # question) gets a confirmation instead of a QA-style "no data" refusal.
+    state["persona_updated"] = updated_persona is not None
     return state
 
 
@@ -86,6 +91,16 @@ def node_answer_qa(state: AgentState) -> AgentState:
             )
 
     if not chunks and not fundamentals_ctx:
+        if not state["stock_symbols"] and state.get("persona_updated"):
+            persona = state["persona"]
+            tags = ", ".join(persona.style_tags or []) or "no specific style tags yet"
+            state["answer"] = (
+                f"Got it — I've updated your investor profile "
+                f"(risk profile: {persona.risk_profile or 'not set'}; style: {tags}). "
+                f"Ask me for picks any time, or follow a stock to get grounded, cited analysis on it."
+            )
+            state["citations"] = []
+            return state
         state["answer"] = "I don't have that in the ingested data yet — try following the stock first so I can pull its fundamentals and news."
         state["citations"] = []
         return state
@@ -211,7 +226,7 @@ def run_agent(db: Session, user_id: str, message: str) -> dict:
     initial_state: AgentState = {
         "db": db, "user_id": user_id, "message": message,
         "intent": None, "stock_symbols": [], "retrieved": [],
-        "persona": None, "answer": "", "citations": [],
+        "persona": None, "persona_updated": False, "answer": "", "citations": [],
     }
     final_state = graph.invoke(initial_state)
     return {"answer": final_state["answer"], "citations": final_state["citations"]}
