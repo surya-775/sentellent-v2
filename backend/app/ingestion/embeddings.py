@@ -1,10 +1,8 @@
 import logging
 from functools import lru_cache
 from typing import List
-
 from google import genai
 from google.genai import types
-
 from app.core.config import settings
 
 logger = logging.getLogger(__name__)
@@ -15,7 +13,6 @@ logger = logging.getLogger(__name__)
 # the client connection — which surfaces to the browser as a bare "Failed to
 # fetch" with no useful error at all.
 _HTTP_OPTIONS = types.HttpOptions(timeout=15_000)  # milliseconds
-
 _client = (
     genai.Client(api_key=settings.GEMINI_API_KEY, http_options=_HTTP_OPTIONS)
     if settings.GEMINI_API_KEY
@@ -30,7 +27,15 @@ def embed_texts(texts: List[str]) -> List[List[float]]:
     if not texts:
         return []
     try:
-        resp = _client.models.embed_content(model=settings.EMBEDDING_MODEL, contents=texts)
+        resp = _client.models.embed_content(
+            model=settings.EMBEDDING_MODEL,
+            contents=texts,
+            # gemini-embedding-001 defaults to 3072-dim output (MRL-capable);
+            # pin it to EMBEDDING_DIM so it matches our vector(EMBEDDING_DIM)
+            # pgvector columns, or every insert/compare breaks with a
+            # dimension-mismatch error.
+            config=types.EmbedContentConfig(output_dimensionality=settings.EMBEDDING_DIM),
+        )
         return [e.values for e in resp.embeddings]
     except Exception as e:
         logger.warning(f"Embedding call failed: {e}")
